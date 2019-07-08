@@ -1,5 +1,6 @@
 import os
 import socket
+import datetime
 path = "/var/lib/docker-extvols/balancer-bird/run/bird.ctl"
 class Bird:
     def __init__(self, path):
@@ -23,7 +24,7 @@ class Bird:
             	n += 1
         return dataToReturn
 
-    def showStatus(self):
+    def showStatus(self,*args):
         self.sock.send(b"show status\n")
         data=self.sock.recv(1024).decode("utf-8").split("\n")
         keys=[
@@ -42,7 +43,7 @@ class Bird:
         		dataToReturn.update({keys[index]: data[index][5:]})
         return dataToReturn   	
         
-    def showInterfaces(self):
+    def showInterfaces(self,*args):
         self.sock.send(b"show interfaces\n")
         data = self.sock.recv(1024).decode("utf-8").split("\n")[:-2]
         dataToReturn = {}
@@ -71,7 +72,7 @@ class Bird:
         dataToReturn = self.parseTable(data, keys)
         return dataToReturn
                         
-    def showProtocols(self):
+    def showProtocols(self,*args):
         self.sock.send(b"show protocols\n")
         data = self.sock.recv(1024).decode("utf-8").split("\n")
         data = data[1:-2]
@@ -79,16 +80,62 @@ class Bird:
         keys = ["Name", "Proto", "Table", "State", "Since", "Info"]
         dataToReturn = self.parseTable(data, keys)
         return dataToReturn
-
              
     def __del__(self):
         self.sock.close()
-        
-new_bird = Bird(path)
-print(new_bird.showStatus())
-print(new_bird.showInterfaces())
-print(new_bird.showNeighbors("External"))
-print(new_bird.showProtocols())
+class Metrics:
+	def __init__(self,path):
+		self.path = path
+		self.sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+		self.sock.bind(("", 2003))
+		self.sock.listen(1)
+		self.connection, self.address = self.sock.accept()
+	def convertTable(self, table):
+	    if table == None:
+	        return "None"
+	    metrics = []
+	    for dic in table:
+	        for key, value in dic.items():
+	            metrics.append(str(key)
+	                           + " "
+	                           + str(value)
+	                           + " "
+	                           + str(datetime.datetime.now().time()))
+	    return metrics
+	    
+	def convertDic(self, dic):
+	    metrics = []
+	    for key, value in dic.items():
+	        metrics.append(str(key)
+	                       + " "
+	                       + str(value)
+	                       + " "
+	                       + str(datetime.datetime.now().time()))
+	    return metrics
+            
+	def createMetrics(self, name, info="", *args):
+		new_bird = Bird(self.path)
+		d = {"Status": new_bird.showStatus,
+		"Interfaces": new_bird.showInterfaces,
+		"Neighbors": new_bird.showNeighbors,
+		"Protocols": new_bird.showProtocols}
+		if name == "Neighbors" or name == "Protocols":
+		    return self.convertTable(d[name](info))
+		else:
+		    return self.convertDic(d[name]())
+
+	def sendMetrics(self, name, info = "", *args):
+	    metrics = self.createMetrics(name, info)
+	    for i in metrics:
+	        self.connection.send(i.encode("utf-8") + b"\n")
+
+	def __del__(self):
+		self.connection.close()
+		
+new_metrics=Metrics(path)
+new_metrics.sendMetrics("Neighbors", "External")
+
+
  
 
     
