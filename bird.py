@@ -1,6 +1,6 @@
 import os
 import socket
-import datetime
+import time
 path = "/var/lib/docker-extvols/balancer-bird/run/bird.ctl"
 class Bird:
     def __init__(self, path):
@@ -19,12 +19,12 @@ class Bird:
         for index_i, i in enumerate(k):
             dataToReturn.append({})
             n = 0
-            for index_j, j in enumerate(k[index_i]):
-            	dataToReturn[index_i].update({keys[index_j]: k[index_i][index_j]})
+            for index_j, j in enumerate(i):
+            	dataToReturn[index_i].update({keys[index_j]: i[index_j]})
             	n += 1
         return dataToReturn
 
-    def showStatus(self,*args):
+    def showStatus(self):
         self.sock.send(b"show status\n")
         data=self.sock.recv(1024).decode("utf-8").split("\n")
         keys=[
@@ -33,17 +33,17 @@ class Bird:
             ]
         dataToReturn = {}
         for index, i in enumerate(data):
-        	if data[index].find("BIRD") != -1:
-        		dataToReturn.update({keys[index]: data[index][5:]})
-        	if data[index].find(" is ") != -1:
-        		dataToReturn.update({keys[index]: data[index].split(" is ")[1]})
-        	if data[index].find(" on ") != -1:
-        		dataToReturn.update({keys[index]: data[index].split(" on ")[1]})
-        	if data[index].find("Daemon") != -1:
-        		dataToReturn.update({keys[index]: data[index][5:]})
+        	if i.find("BIRD") != -1:
+        		dataToReturn.update({keys[index]: i[5:]})
+        	if i.find(" is ") != -1:
+        		dataToReturn.update({keys[index]: i.split(" is ")[1]})
+        	if i.find(" on ") != -1:
+        		dataToReturn.update({keys[index]: i.split(" on ")[1]})
+        	if i.find("Daemon") != -1:
+        		dataToReturn.update({keys[index]: i[5:]})
         return dataToReturn   	
         
-    def showInterfaces(self,*args):
+    def showInterfaces(self):
         self.sock.send(b"show interfaces\n")
         data = self.sock.recv(1024).decode("utf-8").split("\n")[:-2]
         dataToReturn = {}
@@ -51,9 +51,9 @@ class Bird:
         n = []
         j = -1
         for index, i in enumerate(data):
-        	if data[index].find("index=") == -1:
-        		n.append(data[index][6:])
-        	if data[index].find("index=") != -1 or i == len(data) - 1:
+        	if i.find("index=") == -1:
+        		n.append(i[6:])
+        	if i.find("index=") != -1 or i == len(data) - 1:
         		if j > -1:
         			dataToReturn.update({keys[j]: n})
         			n = []
@@ -72,7 +72,7 @@ class Bird:
         dataToReturn = self.parseTable(data, keys)
         return dataToReturn
                         
-    def showProtocols(self,*args):
+    def showProtocols(self):
         self.sock.send(b"show protocols\n")
         data = self.sock.recv(1024).decode("utf-8").split("\n")
         data = data[1:-2]
@@ -83,59 +83,50 @@ class Bird:
              
     def __del__(self):
         self.sock.close()
+        
 class Metrics:
-	def __init__(self,path):
+	def __init__(self, path):
 		self.path = path
 		self.sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
 		self.sock.bind(("", 2003))
 		self.sock.listen(1)
 		self.connection, self.address = self.sock.accept()
-	def convertTable(self, table):
+		
+	def convertTable(self, table, ID , param):
 	    if table == None:
 	        return "None"
-	    metrics = []
 	    for dic in table:
-	        for key, value in dic.items():
-	            metrics.append(str(key)
-	                           + " "
-	                           + str(value)
-	                           + " "
-	                           + str(datetime.datetime.now().time()))
-	    return metrics
+	        if ID == dic[list(dic.keys())[0]] and param in dic.keys():
+	             return str(param) + " " + str(dic[param]) + " " + str(time.time())
+	        else:
+	            raise Exception("no such name or parameter")
 	    
-	def convertDic(self, dic):
-	    metrics = []
-	    for key, value in dic.items():
-	        metrics.append(str(key)
-	                       + " "
-	                       + str(value)
-	                       + " "
-	                       + str(datetime.datetime.now().time()))
-	    return metrics
-            
-	def createMetrics(self, name, info="", *args):
+	def convertDic(self, dic, param):
+	    if param in dic.keys():
+	        return str(param) + " " + str(dic[param]) + " " + str(time.time())
+	    else:
+	        raise Exception("no such parameter")
+
+	def createMetrics(self, name, info, ID, param):
 		new_bird = Bird(self.path)
-		d = {"Status": new_bird.showStatus,
+		d = {
+		"Status": new_bird.showStatus,
 		"Interfaces": new_bird.showInterfaces,
 		"Neighbors": new_bird.showNeighbors,
-		"Protocols": new_bird.showProtocols}
+		"Protocols": new_bird.showProtocols
+		}
 		if name == "Neighbors" or name == "Protocols":
-		    return self.convertTable(d[name](info))
+		    return self.convertTable(d[name](info), ID, param)
 		else:
-		    return self.convertDic(d[name]())
+		    return self.convertDic(d[name](), param)
 
-	def sendMetrics(self, name, info = "", *args):
-	    metrics = self.createMetrics(name, info)
-	    for i in metrics:
-	        self.connection.send(i.encode("utf-8") + b"\n")
+	def sendMetrics(self, name, info = "", ID = None, param = "", **kwargs):
+	    metrics = self.createMetrics(name, info, ID, param)
+	    self.connection.send(metrics.encode("utf-8") + b"\n")
 
 	def __del__(self):
 		self.connection.close()
 		
-new_metrics=Metrics(path)
-new_metrics.sendMetrics("Neighbors", "External")
-
-
- 
-
+new_metrics = Metrics(path)
+new_metrics.sendMetrics("Neighbors", info = "External", ID = "172.20.20.1", param = "State")
     
