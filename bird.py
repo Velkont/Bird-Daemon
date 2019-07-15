@@ -16,7 +16,7 @@ class Bird:
         	raise Exception("Socket is not correct")
         	
     def get_data(self, command):
-        self.sock.send(command.encode("utf-8") + b"\n")
+        self.sock.send(("{0}{1}".format(command, "\n")).encode("utf-8"))
         data = self.sock.recv(1024)
         logging.debug("get_data end")
         data = data.decode("utf-8")
@@ -120,41 +120,45 @@ class FormatData:
         data_to_return = []
         try:
             for dic in table:
-                if param != None and ID == None: #единичная метрика в случае поиска по словарю
-	                data_to_return.append("{0}.{1} {2} {3}".format(str(name), str(param), str(dic[param]), str(int(time.time()))))
-                elif param != None and ID != None and ID in dic.values(): #единичная метрика в случае поиска по таблице
-	                data_to_return.append("{0}.{1}.{2} {3} {4}".format(str(name), str(ID), str(param), str(dic[param]), str(int(time.time()))))
-                elif param == None and ID in dic.values(): 
-                    for key in dic: #продолжение накапливания метрик в случае выбора строки
-	                    data_to_return.append("{0}.{1}.{2} {3} {4}".format(str(name), str(ID), str(key), str(dic[key]), str(int(time.time()))))
-
-                elif param == None and "Version" in dic:
-                     for key in dic: #продолжение накапливания метрик в случае выбора полного словаря
-                        data_to_return.append("{0}.{1} {2} {3}".format(str(name), str(key), str(dic[key]), str(int(time.time()))))
-                elif param == None and ID == None:
-                    key_ID = None 
-                    for key in dic: #продолжение накапливания метрик в случае выбора полной таблицы
-                        if key_ID == None:
-                            key_ID = key
-                        data_to_return.append("{0}.{1}.{2} {3} {4}".format(str(name), str(dic[key_ID]), str(key), str(dic[key]), str(int(time.time()))))
-            if data_to_return == []:
-	            raise KeyError
+                if ID in dic.values() and param in dic:
+                    data_to_return.append("{0}.{1}.{2} {3} {4}".format(str(name), str(ID), 
+                                                                       str(param), str(dic[param]),
+                                                                       str(int(time.time()))))
+                elif param in dic and ID is None:
+                    data_to_return.append("{0}.{1} {2} {3}".format(str(name), str(param), 
+                                                                   str(dic[param]), str(int(time.time()))))
+                elif ID in dic.values() and param is None:
+                    for key in dic:
+	                    data_to_return.append("{0}.{1}.{2} {3} {4}".format(str(name), str(ID),
+	                                                                       str(key), str(dic[key]), 
+	                                                                       str(int(time.time()))))
+                elif "Version" in dic and param is None:
+                        for key in dic:
+                            data_to_return.append("{0}.{1} {2} {3}".format(str(name), str(key),
+                                                                           str(dic[key]), 
+                                                                           str(int(time.time()))))
+	                
+                elif ID is None and param is None:
+	                key_ID = None
+	                for key in dic:
+	                    if key_ID is None:
+	                        key_ID = key
+	                    data_to_return.append("{0}.{1}.{2} {3} {4}".format(str(name), str(dic[key_ID]), 
+	                                                                       str(key), str(dic[key]), 
+	                                                                       str(int(time.time()))))
+            if not data_to_return:
+                data_to_return.append("None")
             return data_to_return
-        except AttributeError as error:
+        except Exception as error:
+	        logging.exception("error while converting table")
 	        logging.exception(error)
-	        logging.exception("no neighbor name put")
 	        logging.debug("--------------")
-        except KeyError as error:
-	        logging.exception(error)
-	        logging.exception("no such parameter or ID")
-	        logging.debug("--------------")
-        return data_to_return
-	        
+           
 	            
     @staticmethod          
     def convert_from_bird_to_metrics(data, name, ID=None, param=None, **kwargs):
         if data == None:
-	        return "None"
+	        return ["None"]
         else:
             return FormatData.convert_bird_table(data, name, ID, param)
 
@@ -187,7 +191,7 @@ if __name__ == "__main__":
     config = [
         {"data": new_bird.show_status(), "name": "Status"},
         {"data": new_bird.show_protocols(), "name": "Protocols", "ID": "Internal"},
-        {"data": new_bird.show_neighbors("Internal"), "name": "Neighbors"}
+        {"data": new_bird.show_neighbors(), "name": "Neighbors"},
     ]
     while 1:
         for i in config:

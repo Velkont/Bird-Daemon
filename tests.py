@@ -62,9 +62,17 @@ class TestBirdClass(unittest.TestCase):
         }]
         self.assertEqual(self.test_bird.show_status(), end_data)
            
-class TestFormatClass(unittest.TestCase):    
-    def test_output_from_bird_to_metrics(self):
-        start_data = [{
+class TestFormatClass(unittest.TestCase):
+    def setUp(self):
+        self.test_dic = [
+            {'Name': 'direct1', 'Proto': 'Direct', 'Table': '---', 'State': 'up', 'Since': '17:26:29.843'}, 
+            {'Name': 'kernel1', 'Proto': 'Kernel', 'Table': 'master4', 'State': 'up', 'Since': '17:26:29.843'}, 
+            {'Name': 'device1', 'Proto': 'Device', 'Table': '---', 'State': 'up', 'Since': '17:26:29.843'}, 
+            {'Name': 'static1', 'Proto': 'Static', 'Table': 'master4', 'State': 'up', 'Since': '17:26:29.843'}, 
+            {'Name': 'External', 'Proto': 'OSPF', 'Table': 'master4', 'State': 'up', 'Since': '17:26:29.843', 'Info': 'Running'},
+            {'Name': 'Internal', 'Proto': 'OSPF', 'Table': 'master4', 'State': 'up', 'Since': '17:26:29.843', 'Info': 'Running'}
+        ]
+        self.test_line = [{
             'Router ID': '172.20.30.1',
             'Pri': '1', 
             'State': 'Full/PtP', 
@@ -72,20 +80,36 @@ class TestFormatClass(unittest.TestCase):
             'Interface': 'veth2internal', 
             'Router IP': '172.20.30.1'
         }]
+        
+    def test_output_from_bird_to_metrics(self):
+        start_data = self.test_line
         end_data = ["Neighbors.172.20.30.1.Pri 1 " + str(int(time.time()))]
-        self.assertEqual(bird.FormatData.convert_from_bird_to_metrics(start_data, name="Neighbors", ID='172.20.30.1', param="Pri"), end_data)
+        self.assertEqual(bird.FormatData.convert_from_bird_to_metrics(start_data, name="Neighbors", 
+                                                                      ID='172.20.30.1', param="Pri"), end_data)
         
     def test_output_convert_bird_table(self):
-        start_data = [{
-            'Router ID': '172.20.30.1', 
-            'Pri': '1', 
-            'State': 'Full/PtP', 
-            'DTime': '38.953', 
-            'Interface': 'veth2internal', 
-            'Router IP': '172.20.30.1'
-        }]
+        start_data = self.test_line
         end_data = ["Neighbors.172.20.30.1.Pri 1 " + str(int(time.time()))]
-        self.assertEqual(bird.FormatData.convert_bird_table(start_data, name="Neighbors", ID='172.20.30.1', param="Pri"), end_data )
+        self.assertEqual(bird.FormatData.convert_bird_table(start_data, name="Neighbors", 
+                                                            ID='172.20.30.1', param="Pri"), end_data)
+    def test_output_convert_bird_table(self):
+        start_data = self.test_dic
+        data = [
+            'Protocols.Internal.Name Internal', 
+            'Protocols.Internal.Proto OSPF', 
+            'Protocols.Internal.Table master4', 
+            'Protocols.Internal.State up', 
+        ]
+        end_data = []
+        for i in data:
+            end_data.append('{0} {1}'.format(i, str(int(time.time()))))
+
+        self.assertEqual(bird.FormatData.convert_bird_table(start_data, name="Protocols", 
+                                                            ID='Internal', param=None)[0:4], end_data)
+    def test_convert_bird_table_attribute_error(self):
+        self.assertRaises(AttributeError, bird.FormatData.convert_bird_table(self.test_bird,show_neighbors(), name="Neighbors", 
+                                                                            ID='Internal', param=None))
+            
         
 
         
