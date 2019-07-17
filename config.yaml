@@ -1,0 +1,12 @@
+paths:
+    path_to_bird: "/var/lib/docker-extvols/balancer-bird/run/bird.ctl"
+methods:
+    status:
+        name: Status
+    protocols:
+        name: Protocols
+        ID: Internal
+    neighbors:
+        name: Neighbors
+        neighbor: Internal
+
