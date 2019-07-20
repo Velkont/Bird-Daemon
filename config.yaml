@@ -1,12 +1,19 @@
-paths:
-    path_to_bird: "/var/lib/docker-extvols/balancer-bird/run/bird.ctl"
+bird_paths:
+    path_to_bird: /var/lib/docker-extvols/balancer-bird/run/bird.ctl
+    path_to_bird_config: /var/lib/docker-extvols/balancer-bird/bird.conf
+    path_to_bird_config_test: ./bird.conf
+metrics_socket:
+    host: ""
+    port: 2003
 methods:
     status:
         name: Status
     protocols:
         name: Protocols
         ID: Internal
-    neighbors:
+    neighbors_internal:
         name: Neighbors
         neighbor: Internal
-
+    neighbors_external:
+        name: Neighbors
+        neighbor: External

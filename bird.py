@@ -5,6 +5,7 @@ import yaml
 import os
 import re
 import asyncio
+from jinja2 import Template
 
 logging.basicConfig(format='%(levelname)s:%(message)s', level=logging.ERROR)
 
@@ -19,29 +20,36 @@ class Config:
             config = yaml.load(config_file)
         return config
 
-    def get_methods_config(self):
+    def get_methods_config(self, instance_of_bird):
         config = self.load_config()
         methods = []
-        for method in config["methods"]:
-            methods.append(config["methods"][method])
         dic_with_data_functions = {
-            "Status": new_bird.show_status,
-            "Protocols": new_bird.show_protocols,
-            "Neighbors": new_bird.show_neighbors
+            "Status": instance_of_bird.show_status,
+            "Protocols": instance_of_bird.show_protocols,
+            "Neighbors": instance_of_bird.show_neighbors,
+            "Interfaces": instance_of_bird.show_interfaces
         }
-        for dic in methods:
-            if dic["name"] == "Neighbors":
-                data = dic_with_data_functions[dic["name"]](dic["neighbor"])
-                dic.update({"data": data})
+        for method_params in config["methods"].values():
+            if method_params["name"] == "Neighbors":
+                data = dic_with_data_functions[method_params["name"]](
+                    method_params["neighbor"])
+                method_params.update({"data": data})
             else:
-                data = dic_with_data_functions[dic["name"]]()
-                dic.update({"data": data})
+                data = dic_with_data_functions[method_params["name"]]()
+                method_params.update({"data": data})
+            methods.append(method_params)
         return methods
 
-    def get_path(self):
+    def get_path(self, w):
         config = self.load_config()
-        path = config["paths"]["path_to_bird"]
+        path = config["bird_paths"][w]
         return path
+
+    def get_metrics_socket(self):
+        config = self.load_config()
+        host = config["metrics_socket"]["host"]
+        port = config["metrics_socket"]["port"]
+        return host, port
 
 
 class Bird:
@@ -49,9 +57,15 @@ class Bird:
         self.path = path
         self.sock = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
         self.sock.connect(self.path)
-        data = self.sock.recv(1024).replace(b".", b"").split()
+        data = self.sock.recv(2048).replace(b".", b"").split()
         if b"BIRD" not in data and b"ready" not in data:
             raise Exception("Socket is not correct")
+
+    def validate_data(self, msg):
+        if re.findall(r'10\d\d-?', msg) and re.findall(r'00\d\d-?', msg):
+            return True
+        else:
+            return False
 
     def get_data(self, command):
         self.sock.send(("{0}{1}".format(command, "\n")).encode("utf-8"))
@@ -59,6 +73,8 @@ class Bird:
         logging.debug(data)
         logging.debug("get_data end")
         data = data.decode("utf-8")
+        while self.validate_data(data) is False:
+            data += self.sock.recv(1024).decode("utf-8")
         return data
 
     def parse_table(self, data, keys):
@@ -89,14 +105,14 @@ class Bird:
         data_to_return = []
         dic = {}
         for i, key in zip(data, keys):
-            if re.findall(r'1000-?', i):
-                dic.update({key: re.sub(r'1000-?', '', i)})
-            elif re.findall(r'0013-?', i):
-                if re.findall(r'Daemon is up and running', i):
+            if i.startswith('1000-'):
+                dic.update({key: i.replace("1000-", "")})
+            elif i.startswith('0013'):
+                if i.find('Daemon is up and running') != -1:
                     dic.update({key: 1})
                 else:
                     dic.update({key: 0})
-            elif re.findall(r'1011-?', i):
+            elif i.startswith('1011-'):
                 ip = re.findall(r'\d+.\d+.\d+.\d+', i)[0]
                 dic.update({key: ip})
             else:
@@ -111,21 +127,23 @@ class Bird:
     def show_interfaces(self):
         data = self.get_data("show interfaces")
         data = data.split("\n")[:-2]
+        logging.debug(data)
         data_to_return = []
         dic = {}
         keys = [x[5:] for x in data if x.find("index=") != -1]
         n = []
         j = -1
-        for i, key in zip(data, keys):
+        for i in data:
             if i.find("index=") == -1:
                 n.append(i[6:])
             if i.find("index=") != -1 or i == len(data) - 1:
                 if j > -1:
-                    data_to_return.update({key: n})
+                    dic.update({keys[j+1]: n})
                     n = []
                 j += 1
         data_to_return.append(dic)
-        logging.debug("show_status end")
+        logging.debug("show_interfaces end")
+        logging.debug(data)
         logging.debug("--------------")
         return data_to_return
 
@@ -148,6 +166,7 @@ class Bird:
         keys = ["Name", "Proto", "Table", "State", "Since", "Info"]
         data_to_return = self.parse_table(data, keys)
         logging.debug("show_protocols end")
+        logging.debug(data)
         logging.debug("--------------")
         return data_to_return
 
@@ -216,10 +235,11 @@ class FormatData:
 
 
 class Metrics:
-    def __init__(self):
+    def __init__(self, metrics_socket):
+        self.metrics_socket = metrics_socket
         self.sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         self.sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-        self.sock.connect(("", 2003))
+        self.sock.connect(self.metrics_socket)
 
     def send_metrics(self, data):
         logging.debug("sen_metrics start")
@@ -237,16 +257,48 @@ class Metrics:
         self.sock.close()
 
 
+class BirdConfig:
+    def __init__(self, path_to_bird_config_test):
+        self.dir_name = os.path.dirname(__file__)
+        self.path_to_bird_config_test = os.path.join(
+            self.dir_name,
+            path_to_bird_config_test)
+        self.path_to_template = os.path.join(self.dir_name, './template.txt')
+
+    def render_bird_config(self, import_rules_External, export_rules_External,
+                           ospf_area_External, import_rules_Internal,
+                           export_rules_Internal, ospf_area_Internal,
+                           **kwargs):
+        with open(self.path_to_template) as template_file:
+            text = template_file.read()
+            template = Template(text)
+            return template.render(import_rules_External=import_rules_External,
+                                   export_rules_External=export_rules_External,
+                                   ospf_area_External=ospf_area_External,
+                                   import_rules_Internal=import_rules_Internal,
+                                   export_rules_Internal=export_rules_Internal,
+                                   ospf_area_Internal=ospf_area_Internal)
+
+    def save_in_file(self, rendered_bird_config):
+        with open(self.path_to_bird_config_test, "w+") as output_file:
+            output_file.write(rendered_bird_config)
+
+
 if __name__ == "__main__":
     new_config = Config()
-    new_metrics = Metrics()
-    new_bird = Bird(new_config.get_path())
-    methods_config = new_config.get_methods_config()
+    new_metrics = Metrics(new_config.get_metrics_socket())
+    new_bird_config = BirdConfig(new_config.get_path("path_to_bird_config_test"))
+    new_bird = Bird(new_config.get_path("path_to_bird"))
+    new_bird_config.save_in_file(new_bird_config.render_bird_config(
+        import_rules_External="all", export_rules_External="all",
+        ospf_area_External="172.30.0.0", import_rules_Internal="all",
+        export_rules_Internal="None", ospf_area_Internal="172.25.0.0"))
     loop = asyncio.get_event_loop()
 
     async def main_coroutine():
         while True:
-            for i in methods_config:
+            methods = new_config.get_methods_config(new_bird)
+            for i in methods:
                 data_to_send = FormatData.convert_from_bird_to_metrics(**i)
                 new_metrics.send_metrics(data_to_send)
             await asyncio.sleep(20)
