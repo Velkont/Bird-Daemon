@@ -51,23 +51,6 @@ class TestBirdClass(unittest.TestCase):
         self.assertEqual(end_data,
                          self.test_bird.parse_table(self.test_bird.data, keys))
 
-    def test_show_status(self):
-        self.test_bird.data = """1000-BIRD 2.0.0
-                                 1011-Router ID is 172.20.20.2
-                                 Current server time is 2019-07-15 07:57:33.909
-                                 Last reboot on 2019-07-15 05:42:51.595
-                                 Last reconfiguration on 2019-07-15 05:42:51.595
-                                 0013 Daemon is up and running"""
-        end_data = [{
-            'Version': 'BIRD 2.0.0',
-            'Router ID': '172.20.20.2',
-            'Current server time': '2019-07-15 07:57:33.909',
-            'Last reboot': '2019-07-15 05:42:51.595',
-            'Last reconfiguration': '2019-07-15 05:42:51.595',
-            'Status': 1
-        }]
-        self.assertEqual(self.test_bird.show_status(), end_data)
-
 
 class TestFormatClass(unittest.TestCase):
     def setUp(self):

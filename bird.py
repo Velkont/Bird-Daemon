@@ -7,7 +7,7 @@ import re
 import asyncio
 from jinja2 import Template
 
-logging.basicConfig(format='%(levelname)s:%(message)s', level=logging.ERROR)
+logging.basicConfig(format='%(levelname)s:%(message)s', level=logging.DEBUG)
 
 
 class Config:
@@ -51,6 +51,23 @@ class Config:
         port = config["metrics_socket"]["port"]
         return host, port
 
+    def get_announcement(self):
+        config = self.load_config()
+        announcement = {}
+        for name, settings in config["announcement"].items():
+            announcement.update({name: settings})
+        return announcement
+
+    def get_none_announcement(self):
+        config = self.load_config()
+        announcement = {}
+        for name, settings in config["announcement"].items():
+            announcement.update({name: settings})
+        for i in announcement.values():
+            i['import_rules'] = 'none'
+            i['export_rules'] = 'none'
+        return announcement
+
 
 class Bird:
     def __init__(self, path):
@@ -63,6 +80,8 @@ class Bird:
 
     def validate_data(self, msg):
         if re.findall(r'10\d\d-?', msg) and re.findall(r'00\d\d-?', msg):
+            return True
+        elif re.findall(r'0002-?', msg) and re.findall(r'[08]0[02][02]', msg):
             return True
         else:
             return False
@@ -170,6 +189,22 @@ class Bird:
         logging.debug("--------------")
         return data_to_return
 
+    def configure_check(self):
+        data = self.get_data('configure check')
+        logging.debug("configure_check_data")
+        logging.debug(data)
+        if data.find('0020') != -1:
+            return True
+        else:
+            logging.debug(data)
+            raise Exception('config is not correct')
+
+    def configure(self):
+        data = self.get_data('configure')
+        logging.debug('configure data')
+        logging.debug(data)
+        logging.debug('----------------')
+
     def __del__(self):
         self.sock.close()
 
@@ -226,6 +261,18 @@ class FormatData:
             logging.debug("--------------")
 
     @staticmethod
+    def convert_state(table):
+        try:
+            if table[0]['State'] == 'Full/PtP':
+                return True
+            else:
+                return False
+        except IndexError as error:
+            logging.exception('no data in show_neighbors')
+            logging.exception(error)
+            return False
+
+    @staticmethod
     def convert_from_bird_to_metrics(data, name, ID=None,
                                      param=None, **kwargs):
         if data is None:
@@ -258,52 +305,114 @@ class Metrics:
 
 
 class BirdConfig:
-    def __init__(self, path_to_bird_config_test):
+    def __init__(self, path_to_bird_config):
         self.dir_name = os.path.dirname(__file__)
-        self.path_to_bird_config_test = os.path.join(
+        self.path_to_bird_config = os.path.join(
             self.dir_name,
-            path_to_bird_config_test)
-        self.path_to_template = os.path.join(self.dir_name, './template.txt')
+            path_to_bird_config)
+        self.path_to_base_template = os.path.join(self.dir_name,
+                                                  './base_template.txt')
+        self.path_to_template = os.path.join(self.dir_name,
+                                             './template.txt')
 
-    def render_bird_config(self, import_rules_External, export_rules_External,
-                           ospf_area_External, import_rules_Internal,
-                           export_rules_Internal, ospf_area_Internal,
-                           **kwargs):
-        with open(self.path_to_template) as template_file:
-            text = template_file.read()
-            template = Template(text)
-            return template.render(import_rules_External=import_rules_External,
-                                   export_rules_External=export_rules_External,
-                                   ospf_area_External=ospf_area_External,
-                                   import_rules_Internal=import_rules_Internal,
-                                   export_rules_Internal=export_rules_Internal,
-                                   ospf_area_Internal=ospf_area_Internal)
+    def render_bird_config(self, announcement):
+        with open(self.path_to_base_template) as base_template_file:
+            with open(self.path_to_template) as template_file:
+                base_text = base_template_file.read()
+                template_text = template_file.read()
+                template = Template(template_text)
+                for neighbor_name, settings in announcement.items():
+                    base_text = "{0}\n{1}\n".format(
+                        base_text,
+                        template.render(name=neighbor_name,
+                                        import_rules=settings["import_rules"],
+                                        export_rules=settings["export_rules"],
+                                        area=settings["area"]))
+        return base_text
 
     def save_in_file(self, rendered_bird_config):
-        with open(self.path_to_bird_config_test, "w+") as output_file:
+        with open(self.path_to_bird_config, "w+") as output_file:
             output_file.write(rendered_bird_config)
 
 
-if __name__ == "__main__":
-    new_config = Config()
-    new_metrics = Metrics(new_config.get_metrics_socket())
-    new_bird_config = BirdConfig(new_config.get_path("path_to_bird_config_test"))
-    new_bird = Bird(new_config.get_path("path_to_bird"))
-    new_bird_config.save_in_file(new_bird_config.render_bird_config(
-        import_rules_External="all", export_rules_External="all",
-        ospf_area_External="172.30.0.0", import_rules_Internal="all",
-        export_rules_Internal="None", ospf_area_Internal="172.25.0.0"))
-    loop = asyncio.get_event_loop()
+class StateMachine:
+    def __init__(self):
+        self.state = True
 
-    async def main_coroutine():
+    def get_state(self):
+        return self.state
+
+    def update(self, ls):
+        if False in ls and self.get_state():
+            self.change_state_to_off()
+        if False not in ls and self.get_state() is False:
+            self.change_state_to_on()
+
+    def change_state_to_on(self):
+        self.state = True
+
+    def change_state_to_off(self):
+        self.state = False
+
+
+if __name__ == "__main__":
+    config = Config()
+    state_machine = StateMachine()
+    metrics = Metrics(config.get_metrics_socket())
+    bird_config = BirdConfig(config.get_path("path_to_bird_config"))
+    bird = Bird(config.get_path("path_to_bird"))
+
+    async def send_metrics_coroutine():
         while True:
-            methods = new_config.get_methods_config(new_bird)
+            methods = config.get_methods_config(bird)
             for i in methods:
                 data_to_send = FormatData.convert_from_bird_to_metrics(**i)
-                new_metrics.send_metrics(data_to_send)
+                metrics.send_metrics(data_to_send)
             await asyncio.sleep(20)
+
+    async def send_states_coroutine():
+        while True:
+            ospf_neighbors = config.get_announcement().keys()
+            list_of_states = []
+            for name in ospf_neighbors:
+                list_of_states.append(
+                    FormatData.convert_state(bird.show_neighbors(name))
+                )
+            state_machine.update(list_of_states)
+            logging.debug('list_of_states')
+            logging.debug(list_of_states)
+            logging.debug('---------------')
+            await asyncio.sleep(20)
+
+    async def define_cofiguration_coroutine():
+        prev_state = None
+        while True:
+            logging.debug('state_machine.state')
+            logging.debug(state_machine.state)
+            if state_machine.state is True and prev_state is not True:
+                announcement = config.get_none_announcement()
+                bird_config.save_in_file(
+                    bird_config.render_bird_config(announcement)
+                )
+                if bird.configure_check():
+                    bird.configure()
+            elif state_machine.state is False and prev_state is True:
+                announcement = config.get_none_announcement()
+                bird_config.save_in_file(
+                    bird_config.render_bird_config(announcement)
+                )
+                if bird.configure_check():
+                    bird.configure()
+            await asyncio.sleep(20)
+
     try:
-        asyncio.ensure_future(main_coroutine())
-        loop.run_forever()
+        loop = asyncio.get_event_loop()
+        tasks = [
+            asyncio.ensure_future(send_metrics_coroutine()),
+            asyncio.ensure_future(send_states_coroutine()),
+            asyncio.ensure_future(define_cofiguration_coroutine())
+        ]
+        loop.run_until_complete(asyncio.wait(tasks))
+
     finally:
         loop.close()
