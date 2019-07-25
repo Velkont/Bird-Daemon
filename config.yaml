@@ -28,3 +28,6 @@ announcement:
         import_rules: all
         export_rules: filter permit_external
         area: 172.30.0.0
+sleep_time:
+    metrics: 10
+    states: 10

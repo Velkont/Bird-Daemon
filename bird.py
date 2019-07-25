@@ -40,9 +40,9 @@ class Config:
             methods.append(method_params)
         return methods
 
-    def get_path(self, w):
+    def get_path(self, target):
         config = self.load_config()
-        path = config["bird_paths"][w]
+        path = config["bird_paths"][target]
         return path
 
     def get_metrics_socket(self):
@@ -67,6 +67,11 @@ class Config:
             i['import_rules'] = 'none'
             i['export_rules'] = 'none'
         return announcement
+
+    def get_sleep_time(self, target):
+        config = self.load_config()
+        sleep_time = config['sleep_time'][target]
+        return sleep_time
 
 
 class Bird:
@@ -339,19 +344,35 @@ class StateMachine:
     def __init__(self):
         self.state = True
 
-    def get_state(self):
+    def is_up(self):
         return self.state
 
     def update(self, ls):
-        if False in ls and self.get_state():
+        if not all(ls) and self.is_up():
             self.change_state_to_off()
-        if False not in ls and self.get_state() is False:
+        if all(ls) and not self.is_up():
             self.change_state_to_on()
 
     def change_state_to_on(self):
+        announcement = config.get_announcement()
+        bird_config.save_in_file(
+            bird_config.render_bird_config(announcement)
+        )
+        if bird.configure_check():
+            bird.configure()
+        else:
+            raise Exception('Incorrect config')
         self.state = True
 
     def change_state_to_off(self):
+        none_announcement = config.get_none_announcement()
+        bird_config.save_in_file(
+            bird_config.render_bird_config(none_announcement)
+        )
+        if bird.configure_check():
+            bird.configure()
+        else:
+            raise Exception('Incorrect config')
         self.state = False
 
 
@@ -368,7 +389,7 @@ if __name__ == "__main__":
             for i in methods:
                 data_to_send = FormatData.convert_from_bird_to_metrics(**i)
                 metrics.send_metrics(data_to_send)
-            await asyncio.sleep(20)
+            await asyncio.sleep(config.get_sleep_time('metrics'))
 
     async def send_states_coroutine():
         while True:
@@ -381,36 +402,16 @@ if __name__ == "__main__":
             state_machine.update(list_of_states)
             logging.debug('list_of_states')
             logging.debug(list_of_states)
-            logging.debug('---------------')
-            await asyncio.sleep(20)
-
-    async def define_cofiguration_coroutine():
-        prev_state = None
-        while True:
-            logging.debug('state_machine.state')
+            logging.debug('State')
             logging.debug(state_machine.state)
-            if state_machine.state is True and prev_state is not True:
-                announcement = config.get_none_announcement()
-                bird_config.save_in_file(
-                    bird_config.render_bird_config(announcement)
-                )
-                if bird.configure_check():
-                    bird.configure()
-            elif state_machine.state is False and prev_state is True:
-                announcement = config.get_none_announcement()
-                bird_config.save_in_file(
-                    bird_config.render_bird_config(announcement)
-                )
-                if bird.configure_check():
-                    bird.configure()
-            await asyncio.sleep(20)
+            logging.debug('---------------')
+            await asyncio.sleep(config.get_sleep_time('states'))
 
     try:
         loop = asyncio.get_event_loop()
         tasks = [
             asyncio.ensure_future(send_metrics_coroutine()),
             asyncio.ensure_future(send_states_coroutine()),
-            asyncio.ensure_future(define_cofiguration_coroutine())
         ]
         loop.run_until_complete(asyncio.wait(tasks))
 
